@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <title>Simulador Espacial - Trabalho Final</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <link rel=stylesheet href="css/base.css"/>
+    <style>
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #00FF00;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 20px;
+            font-weight: bold;
+            z-index: 100;
+            text-shadow: 2px 2px 0px #000; 
+            pointer-events: none; 
+        }
+        #mira {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: rgba(0, 255, 0, 0.4); 
+            font-size: 24px;
+            font-family: sans-serif;
+            pointer-events: none; 
+            z-index: 100;
+        }
+        #bloqueio {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 35px;
+            font-family: sans-serif;
+            cursor: pointer;
+            z-index: 200;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<script src="js/Three.js"></script>
+<script src="js/Detector.js"></script>
+<script src="js/Stats.js"></script>
+<script src="js/THREEx.KeyboardState.js"></script>
+<script src="js/THREEx.FullScreen.js"></script>
+<script src="js/THREEx.WindowResize.js"></script>
+
+<div id="bloqueio">
+    CLIQUE AQUI PARA ENTRAR NA NAVE<br>
+    <span style="font-size: 20px; color: #aaa; margin-top: 15px; display: block;">Use o Mouse para olhar ao redor.<br>W/S (Bico) | A/D (Virar) | Q/E (Rolar)<br>Clique Esquerdo (Acelerar) | Clique Direito (Ré)<br>(ESC para sair)</span>
+</div>
+
+<div id="hud">
+    Olhar: Mover o Mouse<br>
+    Inclinar (Frente/Trás): W / S<br>
+    Virar (Esq/Dir): A / D<br>
+    Rolar (Esq/Dir): Q / E<br>
+    Acelerar: Clique Esquerdo<br>
+    Marchar Ré: Clique Direito
+</div>
+<div id="mira">+</div>
+
+<div id="ThreeJS" style="position: absolute; left:0px; top:0px"></div>
+<script>
+
+// =========================================================================
+// 1. VARIÁVEIS GLOBAIS
+// =========================================================================
+var container, scene, camera, renderer, stats;
+var keyboard = new THREEx.KeyboardState();
+var clock = new THREE.Clock();
+var estrelas;
+
+var nave;
+var pivotCamera; 
+
+var acelerandoFrente = false;
+var acelerandoTras = false;
+
+var eixo1, sol1, torusTerra, planetaPedra, eixoPedra, sateliteKnot, planetaLua, anelFumaca;
+var eixo2, sol2, planeta2;
+var eixo3, sol3, planeta3;
+var eixo4, sol4, planeta4;
+
+// =========================================================================
+// 2. CONTROLE DO MOUSE
+// =========================================================================
+var bloqueioTela = document.getElementById('bloqueio');
+
+bloqueioTela.addEventListener('click', function () {
+    document.body.requestPointerLock = document.body.requestPointerLock || document.body.mozRequestPointerLock;
+    if (document.body.requestPointerLock) {
+        document.body.requestPointerLock();
+    }
+}, false);
+
+document.addEventListener('pointerlockchange', travaMouse, false);
+document.addEventListener('mozpointerlockchange', travaMouse, false);
+
+function travaMouse() {
+    if (document.pointerLockElement === document.body || document.mozPointerLockElement === document.body) {
+        bloqueioTela.style.display = 'none'; 
+    } else {
+        bloqueioTela.style.display = 'flex'; 
+        acelerandoFrente = false;
+        acelerandoTras = false;
+    }
+}
+
+document.addEventListener('mousemove', function(event) {
+    if (document.pointerLockElement === document.body || document.mozPointerLockElement === document.body) {
+        var moveX = event.movementX || event.mozMovementX || 0;
+        var moveY = event.movementY || event.mozMovementY || 0;
+
+        if (pivotCamera) {
+            pivotCamera.rotation.y -= moveX * 0.002; 
+            pivotCamera.rotation.x -= moveY * 0.002; 
+            pivotCamera.rotation.x = Math.max(-Math.PI/2, Math.min(Math.PI/2, pivotCamera.rotation.x));
+        }
+    }
+}, false);
+
+document.addEventListener('mousedown', function(event) {
+    if (document.pointerLockElement === document.body) {
+        if (event.button === 0) acelerandoFrente = true; 
+        if (event.button === 2) acelerandoTras = true;   
+    }
+}, false);
+
+document.addEventListener('mouseup', function(event) {
+    if (event.button === 0) acelerandoFrente = false;
+    if (event.button === 2) acelerandoTras = false;
+}, false);
+
+document.addEventListener('contextmenu', function(event) {
+    event.preventDefault();
+}, false);
+
+
+init();
+animate();
+
+function init() 
+{
+    scene = new THREE.Scene();
+    
+    var SCREEN_WIDTH = window.innerWidth, SCREEN_HEIGHT = window.innerHeight;
+    var VIEW_ANGLE = 45, ASPECT = SCREEN_WIDTH / SCREEN_HEIGHT;
+    var NEAR = 0.1, FAR = 200000; // FAR ajustado para a nova escala menor
+    
+    camera = new THREE.PerspectiveCamera( VIEW_ANGLE, ASPECT, NEAR, FAR);
+    
+    if ( Detector.webgl ) renderer = new THREE.WebGLRenderer( {antialias:true} );
+    else renderer = new THREE.CanvasRenderer(); 
+    
+    renderer.setSize(SCREEN_WIDTH, SCREEN_HEIGHT);
+    renderer.setClearColor(0x000000, 1); 
+
+    container = document.getElementById( 'ThreeJS' );
+    container.appendChild( renderer.domElement );
+    
+    THREEx.WindowResize(renderer, camera);
+    THREEx.FullScreen.bindKey({ charCode : 'm'.charCodeAt(0) });
+    
+    stats = new Stats();
+    stats.domElement.style.position = 'absolute';
+    stats.domElement.style.bottom = '0px';
+    container.appendChild( stats.domElement );
+
+    renderer.setClearColor(0x000000, 1);
+
+    // =========================================================================
+    // 3. AMBIENTE (Estrelas Partículas)
+    // =========================================================================
+    var estrelasGeom = new THREE.Geometry();
+
+    for (var i = 0; i < 500; i++) {
+        var raio = 50000; // Raio ajustado
+        var theta = Math.random() * Math.PI * 2;
+        var phi = Math.acos(2 * Math.random() - 1);
+
+        estrelasGeom.vertices.push(
+            new THREE.Vector3(
+                raio * Math.sin(phi) * Math.cos(theta),
+                raio * Math.sin(phi) * Math.sin(theta),
+                raio * Math.cos(phi)
+            )
+        );
+    }
+
+    var estrelasMaterial = new THREE.ParticleBasicMaterial({
+        color: 0xffffff,
+        size: 150 // Tamanho ajustado
+    });
+
+    estrelas = new THREE.ParticleSystem(estrelasGeom, estrelasMaterial);
+    scene.add(estrelas);
+
+
+    // =========================================================================
+    // 4. NAVE DO JOGADOR
+    // =========================================================================
+    nave = new THREE.Object3D();
+    nave.position.set(6000, 1500, 6000); // Mais próximo do centro
+    scene.add(nave);
+
+    var luzNave = new THREE.PointLight(0xffffff, 1.5, 500); // Luz menor
+    luzNave.position.set(0, 5, 0); 
+    nave.add(luzNave);
+
+    pivotCamera = new THREE.Object3D();
+    nave.add(pivotCamera);
+
+    pivotCamera.add(camera);
+    // Câmera muito mais perto da nave para evidenciar o tamanho pequeno dela
+    camera.position.set(0,0.12,0.8); 
+    camera.rotation.x = -0.10; 
+
+    var jsonLoader = new THREE.JSONLoader();
+    jsonLoader.load('models/spaceship.js', function (geometry, materials) {
+        var materialNave = materials ? new THREE.MeshFaceMaterial(materials) : new THREE.MeshLambertMaterial({ color: 0x88ccff });
+        var malhaNave = new THREE.Mesh(geometry, materialNave);
+        
+        // Escala da nave extremamente reduzida! Ela agora é um "mosquito"
+        malhaNave.scale.set(0.01, 0.01, 0.01); 
+        malhaNave.rotation.y = 0; 
+        nave.add(malhaNave);
+    });
+
+   
+    // =========================================================================
+    // 5. SISTEMA SOLAR 1 (LAVA)
+    // =========================================================================
+    eixo1 = new THREE.Object3D();
+    scene.add(eixo1);
+
+    var luz1 = new THREE.PointLight(0xff4400, 6, 80000); 
+    eixo1.add(luz1);
+
+    var texturaLava = THREE.ImageUtils.loadTexture( 'images/lava.jpg' );
+    // Os astros estão menores em números absolutos, mas gigantescos perto da nave
+    sol1 = new THREE.Mesh( new THREE.SphereGeometry( 2000, 64, 64 ), new THREE.MeshBasicMaterial({ map: texturaLava }) );
+    eixo1.add( sol1 );
+
+    var texturaTerra = THREE.ImageUtils.loadTexture( 'images/earth-day.jpg' );
+    torusTerra = new THREE.Mesh( new THREE.TorusGeometry(350, 100, 32, 100), new THREE.MeshLambertMaterial({ map: texturaTerra, emissive: 0x222222 }) );
+    torusTerra.position.set(4000, 0, 0); 
+    eixo1.add( torusTerra );
+
+    var texturaPedra = THREE.ImageUtils.loadTexture( 'images/rock-512.jpg' );
+    planetaPedra = new THREE.Mesh( new THREE.SphereGeometry( 600, 32, 32 ), new THREE.MeshLambertMaterial({ map: texturaPedra, emissive: 0x111111 }) );
+    planetaPedra.position.set(-6500, 100, 500);
+    eixo1.add( planetaPedra );
+
+    eixoPedra = new THREE.Object3D();
+    planetaPedra.add(eixoPedra); 
+    
+    var texturaKnot = THREE.ImageUtils.loadTexture( 'images/heightmap.png' );
+    sateliteKnot = new THREE.Mesh( new THREE.TorusKnotGeometry( 80, 20, 160, 100, 3, 7 ), new THREE.MeshLambertMaterial({ map: texturaKnot, emissive: 0x333333 }) );
+    sateliteKnot.position.set(1200, 0, 0); 
+    eixoPedra.add( sateliteKnot );
+
+    var texturaFumaca = THREE.ImageUtils.loadTexture( 'images/smoke512.png' );
+    texturaFumaca.wrapS = texturaFumaca.wrapT = THREE.RepeatWrapping;
+    texturaFumaca.repeat.set( 8, 8 ); 
+    anelFumaca = new THREE.Mesh( new THREE.TorusGeometry(8000, 200, 16, 100), new THREE.MeshBasicMaterial({ map: texturaFumaca, transparent: true, opacity: 0.5 }) );
+    eixo1.add( anelFumaca );
+    
+
+    // =========================================================================
+    // 6. SISTEMAS SOLARES DISTANTES
+    // =========================================================================
+    
+    // SISTEMA AZUL
+    eixo2 = new THREE.Object3D();
+    eixo2.position.set(98000, 10000, 0);
+    scene.add(eixo2);
+
+    var luz2 = new THREE.PointLight(0x0088ff, 6, 80000); 
+    eixo2.add(luz2);
+
+    sol2 = new THREE.Mesh( new THREE.SphereGeometry( 1500, 64, 64 ), new THREE.MeshBasicMaterial({color: 0x00aaff}) );
+    eixo2.add( sol2 );
+
+    planeta2 = new THREE.Mesh( new THREE.SphereGeometry( 150, 64, 64 ), new THREE.MeshLambertMaterial({ map: texturaPedra, emissive: 0x001133 }) );
+    planeta2.position.set(3000, 0, 0);
+    eixo2.add( planeta2 );
+
+    // SISTEMA ROXO
+    eixo3 = new THREE.Object3D();
+    eixo3.position.set(0, -70000, -42000);
+    scene.add(eixo3);
+
+    var luz3 = new THREE.PointLight(0xff00ff, 6, 80000); 
+    eixo3.add(luz3);
+
+    sol3 = new THREE.Mesh( new THREE.SphereGeometry( 2500, 64, 64 ), new THREE.MeshBasicMaterial({color: 0xff00ff}) );
+    eixo3.add( sol3 );
+
+    var texturaLua = THREE.ImageUtils.loadTexture( 'images/moon.jpg' );
+    planeta3 = new THREE.Mesh( new THREE.SphereGeometry( 100, 64, 64 ), new THREE.MeshLambertMaterial({ map: texturaLua, emissive: 0x220022 }) );
+    planeta3.position.set(-4500, 0, 0);
+    eixo3.add( planeta3 );
+
+    // SISTEMA VERDE
+    eixo4 = new THREE.Object3D();
+    eixo4.position.set(-55000, 0, 65000);
+    scene.add(eixo4);
+
+    var luz4 = new THREE.PointLight(0x00ff00, 6, 80000); 
+    eixo4.add(luz4);
+
+    sol4 = new THREE.Mesh( new THREE.SphereGeometry( 4000, 64, 64 ), new THREE.MeshBasicMaterial({color: 0x00ff00}) );
+    eixo4.add( sol4 );
+
+    planeta4 = new THREE.Mesh( new THREE.SphereGeometry( 250, 64, 64 ), new THREE.MeshLambertMaterial({ map: texturaTerra, emissive: 0x002200 }) );
+    planeta4.position.set(7000, 0, 0);
+    eixo4.add( planeta4 );
+}
+
+
+// =========================================================================
+// 7. FUNÇÕES DE ATUALIZAÇÃO E ANIMAÇÃO (LOOP)
+// =========================================================================
+function animate() 
+{
+    requestAnimationFrame( animate );
+    render();       
+    update();
+}
+
+function update()
+{
+    var tempo = clock.getElapsedTime();
+
+    if (document.pointerLockElement === document.body) {
+        
+        var velocidadeGiro = 0.015; // Rotação da nave mais lenta e suave
+
+        if ( keyboard.pressed("W") || keyboard.pressed("w") ) nave.rotateX( -velocidadeGiro ); 
+        if ( keyboard.pressed("S") || keyboard.pressed("s") ) nave.rotateX( velocidadeGiro );  
+        if ( keyboard.pressed("A") || keyboard.pressed("a") ) nave.rotateY( velocidadeGiro );    
+        if ( keyboard.pressed("D") || keyboard.pressed("d") ) nave.rotateY( -velocidadeGiro );   
+        if ( keyboard.pressed("Q") || keyboard.pressed("q") ) nave.rotateZ( velocidadeGiro );    
+        if ( keyboard.pressed("E") || keyboard.pressed("e") ) nave.rotateZ( -velocidadeGiro );   
+
+        // Velocidade da nave reduzida para combinar com a nova escala
+        var velNave = 10; 
+        if (acelerandoFrente) {
+            nave.translateZ( -velNave ); 
+        }
+        if (acelerandoTras) {
+            nave.translateZ( velNave ); 
+        }
+    }
+
+    // --- Rotações orbitais reduzidas brutalmente para parecerem corpos celestes pesados ---
+    torusTerra.rotation.y -= 0.0002;
+    torusTerra.rotation.x += 0.0002;
+    torusTerra.rotation.z -= 0.0002;
+    anelFumaca.rotation.y += 0.00005;
+    sateliteKnot.rotation.y -= 0.0005; 
+    eixoPedra.rotation.y += 0.0002;    
+    eixo1.rotation.y += 0.0001;       
+    
+    var escala = 1 +  Math.sin(tempo)/20; 
+    sol1.scale.set(escala, escala, escala);
+
+    eixo2.rotation.y += 0.00015; 
+    planeta2.rotation.y += 0.0004; 
+    eixo3.rotation.y -= 0.0001; 
+    planeta3.rotation.y += 0.0003;
+    eixo4.rotation.y += 0.00008; 
+    planeta4.rotation.y += 0.0003;
+
+    // Estrelas acompanham a nave
+    estrelas.position.copy(nave.position);
+    stats.update();
+}
+
+function render() 
+{
+    renderer.render( scene, camera );
+}
+
+</script>
+
+</body>
+</html>
